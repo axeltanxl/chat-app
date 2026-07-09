@@ -7,17 +7,15 @@
 namespace chat {
 
 class ChatServer {
-
-  public:
-    ChatServer(boost::asio::io_context& io_context, unsigned short port)
+public:
+    ChatServer(boost::asio::io_context &io_context, unsigned short port)
         : acceptor_server_(io_context, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)),
           server_socket_(io_context) {}
 
     // Driver program for receiving data from buffer
-    std::string getData()
-    {
+    std::string getData() {
         boost::asio::streambuf buf;
-        boost::asio::read_until(server_socket_, buf, "\n");
+        boost::asio::read_until(server_socket_, buf, "\n"); // reads until newline character is found
         std::istream is(&buf);
         std::string data;
         std::getline(is, data);
@@ -25,8 +23,7 @@ class ChatServer {
     }
 
     // Driver program to send data
-    void sendData(const std::string& message)
-    {
+    void sendData(const std::string &message) {
         boost::asio::write(server_socket_, boost::asio::buffer(message + "\n"));
     }
 
@@ -34,15 +31,14 @@ class ChatServer {
         acceptor_server_.accept(server_socket_);
     }
 
-
-  private:
+private:
     boost::asio::ip::tcp::acceptor acceptor_server_;
     boost::asio::ip::tcp::socket server_socket_;
 };
 
 class ChatSession {
-  public:
-    ChatSession(ChatServer& server, std::string username)
+public:
+    ChatSession(ChatServer &server, std::string username)
         : server_(server), username_(std::move(username)) {}
 
     void run() {
@@ -71,16 +67,15 @@ class ChatSession {
         }
     }
 
-  private:
-    ChatServer& server_;
+private:
+    ChatServer &server_;
     std::string username_;
     std::string reply_;
 };
 
 } // namespace chat
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     boost::asio::io_context io_context;
 
     chat::ChatServer chat_server(io_context, 9999);
