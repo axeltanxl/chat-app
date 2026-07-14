@@ -4,6 +4,7 @@
 #include <boost/asio.hpp>
 #include <iostream>
 #include <string>
+#include <thread>
 
 namespace chat {
 
@@ -52,25 +53,40 @@ public:
     void run() {
         client_.send(username_);
 
-        while (true) {
-            const std::string response = client_.receive();
-            if (response == "exit") {
-                std::cout << "Connection terminated" << std::endl;
-                break;
-            }
-            std::cout << "Server: " << response << std::endl;
+        // Reads broadcasts off the socket as they arrive, independent of
+        // whatever the user is doing on stdin.
+        std::thread reader([this]() { readLoop(); });
 
-            std::cout << username_ << ": ";
-            std::string reply;
-            if (!std::getline(std::cin, reply) || reply == "exit") {
-                client_.send("exit");
+        std::string reply;
+        while (std::getline(std::cin, reply)) {
+            if (reply == "exit") {
                 break;
             }
             client_.send(reply);
         }
+        client_.send("exit");
+
+        // Closing the socket unblocks the reader thread's pending read.
+        client_.close();
+        reader.join();
     }
 
 private:
+    void readLoop() {
+        try {
+            while (true) {
+                const std::string response = client_.receive();
+                if (response == "exit") {
+                    std::cout << "\nConnection terminated" << std::endl;
+                    break;
+                }
+                std::cout << "\n" << response << std::endl;
+            }
+        } catch (const std::exception&) {
+            
+        }
+    }
+
     ChatClient& client_;
     std::string username_;
 };
@@ -78,7 +94,7 @@ private:
 } // namespace chat
 
 int main(int argc, char* argv[]) {
-    const std::string host = argc > 1 ? argv[1] : "127.0.0.1";
+    const std::string host = "127.0.0.1";
     const unsigned short port =
         static_cast<unsigned short>(argc > 2 ? std::stoi(argv[2]) : 9999);
 

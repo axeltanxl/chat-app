@@ -33,7 +33,7 @@ private:
     boost::asio::ip::tcp::acceptor acceptor_;
 };
 
-class ChatManager;   // forward declaration: ChatSession only needs a reference to it below
+class ChatManager;
 
 class ChatSession {
 public:
@@ -93,15 +93,15 @@ private:
 
 // ChatManager is complete now, so ChatSession::run() can call manager_.broadcast(...)
 void ChatSession::run() {
-    sendData("Hello " + username_ + "!");
+    manager_.broadcast(username_ + " joined the chat!");
 
     while (true) {
         const std::string message = getData();
         if (message == "exit") {
-            std::cout << username_ << " left!" << std::endl;
+            manager_.broadcast(username_ + " left the chat!");
             break;
         }
-        std::cout << username_ << ": " << message << std::endl;
+        // std::cout << username_ << ": " << message << std::endl;
         manager_.broadcast(username_ + ": " + message);
     }
 }
@@ -114,6 +114,8 @@ int main(int argc, char *argv[]) {
     chat::ChatServer chat_server(io_context, 9999);
 
     chat::ChatManager chat_manager;
+
+    std::cout << "Server is running on port 9999..." << std::endl;
 
     while(true){
         // waiting for connection
