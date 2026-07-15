@@ -5,9 +5,10 @@
 #include <iostream>
 #include <thread>
 
+const unsigned short PORT = 9999;
+
 namespace chat {
 
-// Driver program for receiving data from buffer
 std::string readLine(boost::asio::ip::tcp::socket &socket) {
     boost::asio::streambuf buf;
     boost::asio::read_until(socket, buf, "\n"); // reads until newline character is found
@@ -40,22 +41,19 @@ public:
     ChatSession(std::shared_ptr<boost::asio::ip::tcp::socket> socket, std::string username, ChatManager& manager)
         : socket_(std::move(socket)), username_(std::move(username)), manager_(manager) {}
 
-    // Driver program for receiving data from buffer
     std::string getData() {
         return readLine(*socket_);
     }
 
-    // Driver program to send data
     void sendData(const std::string &message) {
         boost::asio::write(*socket_, boost::asio::buffer(message + "\n"));
     }
 
-    void run();   // defined below, once ChatManager is fully declared
+    void run();
 
 private:
     std::shared_ptr<boost::asio::ip::tcp::socket> socket_;
     std::string username_;
-    std::string reply_;
     ChatManager& manager_;
 };
 
@@ -91,14 +89,13 @@ private:
     std::unordered_map<std::string, std::shared_ptr<ChatSession>> clients_;
 };
 
-// ChatManager is complete now, so ChatSession::run() can call manager_.broadcast(...)
 void ChatSession::run() {
     manager_.broadcast(username_ + " joined the chat!");
 
     while (true) {
         const std::string message = getData();
         if (message == "exit") {
-            manager_.broadcast(username_ + " left the chat!");
+            manager_.broadcast(username_ + " left the chat.");
             break;
         }
         // std::cout << username_ << ": " << message << std::endl;
@@ -111,11 +108,11 @@ void ChatSession::run() {
 int main(int argc, char *argv[]) {
     boost::asio::io_context io_context;
 
-    chat::ChatServer chat_server(io_context, 9999);
+    chat::ChatServer chat_server(io_context, PORT);
 
     chat::ChatManager chat_manager;
 
-    std::cout << "Server is running on port 9999..." << std::endl;
+    std::cout << "Server is running on port " << PORT << "..." << std::endl;
 
     while(true){
         // waiting for connection

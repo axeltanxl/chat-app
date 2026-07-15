@@ -8,7 +8,7 @@
 
 namespace chat {
 
-// Owns the socket and handles the raw send/receive protocol.
+// owns the socket and handles the raw send/receive protocol.
 class ChatClient {
 public:
     explicit ChatClient(boost::asio::io_context& io_context)
@@ -44,7 +44,7 @@ private:
     boost::asio::ip::tcp::socket socket_;
 };
 
-// Owns the chat loop / console interaction, independent of the transport.
+// owns the chat loop / console interaction, independent of the transport.
 class ChatSession {
 public:
     ChatSession(ChatClient& client, std::string username)
@@ -53,8 +53,7 @@ public:
     void run() {
         client_.send(username_);
 
-        // Reads broadcasts off the socket as they arrive, independent of
-        // whatever the user is doing on stdin.
+        // reads broadcasts off the socket as they arrive
         std::thread reader([this]() { readLoop(); });
 
         std::string reply;
@@ -66,7 +65,7 @@ public:
         }
         client_.send("exit");
 
-        // Closing the socket unblocks the reader thread's pending read.
+        // closing the socket unblocks the reader thread's pending read.
         client_.close();
         reader.join();
     }
