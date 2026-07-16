@@ -4,6 +4,7 @@
 #include <boost/asio.hpp>
 #include <iostream>
 #include <thread>
+#include <string>
 
 const unsigned short PORT = 9999;
 
@@ -98,8 +99,19 @@ void ChatSession::run() {
             manager_.broadcast(username_ + " left the chat.");
             break;
         }
-        // std::cout << username_ << ": " << message << std::endl;
-        manager_.broadcast(username_ + ": " + message);
+
+        if (message.starts_with("/msg ")) {
+            // private message
+            size_t space_pos = message.find(' ', 5); // find the space after the username
+            if (space_pos != std::string::npos) {
+                std::string target_username = message.substr(5, space_pos - 5);
+                std::string private_message = message.substr(space_pos + 1);
+                manager_.sendTo(target_username, username_ + " (private): " + private_message);
+            }
+        } else {
+            // broadcast message
+            manager_.broadcast(username_ + ": " + message);
+        }
     }
 }
 
