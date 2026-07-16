@@ -47,12 +47,10 @@ private:
 // owns the chat loop / console interaction, independent of the transport.
 class ChatSession {
 public:
-    ChatSession(ChatClient& client, std::string username)
-        : client_(client), username_(std::move(username)) {}
+    ChatSession(ChatClient& client)
+        : client_(client) {}
 
     void run() {
-        client_.send(username_);
-
         // reads broadcasts off the socket as they arrive
         std::thread reader([this]() { readLoop(); });
 
@@ -102,11 +100,11 @@ int main(int argc, char* argv[]) {
         chat::ChatClient client(io_context);
         client.connect(host, port);
 
-        std::cout << "Enter your name: ";
-        std::string username;
-        std::getline(std::cin, username);
+        // std::cout << "Enter your name: ";
+        // std::string username;
+        // std::getline(std::cin, username);
 
-        chat::ChatSession session(client, username);
+        chat::ChatSession session(client);
         session.run();
     } catch (const std::exception& e) {
         std::cerr << "Failed to connect/communicate: " << e.what() << std::endl;

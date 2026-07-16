@@ -7,16 +7,21 @@
 #include <string>
 
 const unsigned short PORT = 9999;
+const std::size_t MAX_LINE_LENGTH = 10;
 
 namespace chat {
 
 std::string readLine(boost::asio::ip::tcp::socket &socket) {
-    boost::asio::streambuf buf;
+    boost::asio::streambuf buf(MAX_LINE_LENGTH);
     boost::asio::read_until(socket, buf, "\n"); // reads until newline character is found
     std::istream is(&buf);
     std::string data;
     std::getline(is, data);
     return data;
+}
+
+void writeLine(boost::asio::ip::tcp::socket &socket, const std::string &message) {
+    boost::asio::write(socket, boost::asio::buffer(message + "\n"));
 }
 
 class ChatServer {
@@ -47,7 +52,7 @@ public:
     }
 
     void sendData(const std::string &message) {
-        boost::asio::write(*socket_, boost::asio::buffer(message + "\n"));
+        writeLine(*socket_, message);
     }
 
     void run();
@@ -85,6 +90,11 @@ public:
         }
     }
 
+    bool exists(const std::string &username) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return clients_.find(username) != clients_.end();
+    }
+
 private:
     std::mutex mutex_;
     std::unordered_map<std::string, std::shared_ptr<ChatSession>> clients_;
@@ -93,25 +103,29 @@ private:
 void ChatSession::run() {
     manager_.broadcast(username_ + " joined the chat!");
 
-    while (true) {
-        const std::string message = getData();
-        if (message == "exit") {
-            manager_.broadcast(username_ + " left the chat.");
-            break;
-        }
-
-        if (message.starts_with("/msg ")) {
-            // private message
-            size_t space_pos = message.find(' ', 5); // find the space after the username
-            if (space_pos != std::string::npos) {
-                std::string target_username = message.substr(5, space_pos - 5);
-                std::string private_message = message.substr(space_pos + 1);
-                manager_.sendTo(target_username, username_ + " (private): " + private_message);
+    try {
+        while (true) {
+            const std::string message = getData();
+            if (message == "exit") {
+                manager_.broadcast(username_ + " left the chat.");
+                break;
             }
-        } else {
-            // broadcast message
-            manager_.broadcast(username_ + ": " + message);
+
+            if (message.starts_with("/msg ")) {
+                // private message
+                size_t space_pos = message.find(' ', 5); // find the space after the username
+                if (space_pos != std::string::npos) {
+                    std::string target_username = message.substr(5, space_pos - 5);
+                    std::string private_message = message.substr(space_pos + 1);
+                    manager_.sendTo(target_username, username_ + " (private): " + private_message);
+                }
+            } else {
+                // broadcast message
+                manager_.broadcast(username_ + ": " + message);
+            }
         }
+    } catch (const std::exception &e) {
+        std::cerr << "Error in session for " << username_ << ": " << e.what() << std::endl;
     }
 }
 
@@ -130,16 +144,35 @@ int main(int argc, char *argv[]) {
         // waiting for connection
         auto socket = chat_server.acceptConnection();
 
-        // get username from client
-        std::string u_name = chat::readLine(*socket);
+        try {
+            // prompt for username
+            chat::writeLine(*socket, "Enter your username: ");
 
-        auto session = std::make_shared<chat::ChatSession>(socket, u_name, chat_manager);
+            // get username from client
+            std::string u_name = chat::readLine(*socket);
 
-        chat_manager.add(u_name, session);
+            // check if username is already taken
+            while (chat_manager.exists(u_name)) {
+                chat::writeLine(*socket, "Username already taken. Please choose another one. Enter your username: ");
+                u_name = chat::readLine(*socket);
+            }
 
-        std::thread([session, &chat_manager, u_name]() {
-            session->run();
-            chat_manager.remove(u_name);
-        }).detach();
+            auto session = std::make_shared<chat::ChatSession>(socket, u_name, chat_manager);
+            chat_manager.add(u_name, session);
+
+            std::thread([session, &chat_manager, u_name]() {
+                session->run();
+                chat_manager.remove(u_name);
+            }).detach();
+        } catch (const std::exception &e) {
+            std::cerr << "Error during connection setup: " << e.what() << std::endl;
+            try {
+                chat::writeLine(*socket, "Error: connection closed (" + std::string(e.what()) + ")");
+            } catch (...) {
+                
+            }
+            boost::system::error_code ec;
+            socket->close(ec);
+        }
     }
 }
