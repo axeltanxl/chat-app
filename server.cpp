@@ -7,7 +7,7 @@
 #include <string>
 
 const unsigned short PORT = 9999;
-const std::size_t MAX_LINE_LENGTH = 10;
+const std::size_t MAX_LINE_LENGTH = 15;
 
 namespace chat {
 
@@ -75,12 +75,14 @@ public:
         clients_.erase(username);
     };
 
-    void sendTo(const std::string &username, const std::string &message) {
+    bool sendTo(const std::string &username, const std::string &message) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = clients_.find(username);
         if (it != clients_.end()) {
             it->second->sendData(message);
+            return true;
         }
+        return false;
     };
 
     void broadcast(const std::string &message) {
@@ -90,9 +92,17 @@ public:
         }
     }
 
-    bool exists(const std::string &username) {
+    std::string listUsers() {
         std::lock_guard<std::mutex> lock(mutex_);
-        return clients_.find(username) != clients_.end();
+        std::string user_list = "Connected users: ";
+        for (const auto &[username, session] : clients_) {
+            user_list += username + ", ";
+        }
+        if (!clients_.empty()) {
+            user_list.pop_back(); // remove last space
+            user_list.pop_back(); // remove last comma
+        }
+        return user_list;
     }
 
 private:
@@ -117,8 +127,13 @@ void ChatSession::run() {
                 if (space_pos != std::string::npos) {
                     std::string target_username = message.substr(5, space_pos - 5);
                     std::string private_message = message.substr(space_pos + 1);
-                    manager_.sendTo(target_username, username_ + " (private): " + private_message);
+                    if (!manager_.sendTo(target_username, username_ + " (private): " + private_message)) {
+                        sendData("Error: user '" + target_username + "' not found.");
+                    }
                 }
+            } else if (message == "/list") {
+                // list users
+                sendData(manager_.listUsers());
             } else {
                 // broadcast message
                 manager_.broadcast(username_ + ": " + message);
@@ -126,6 +141,12 @@ void ChatSession::run() {
         }
     } catch (const std::exception &e) {
         std::cerr << "Error in session for " << username_ << ": " << e.what() << std::endl;
+        try {
+            sendData("Error: " + std::string(e.what()) + ". Connection closing.");
+        } catch (...) {
+            std::cerr << "Error: Failed to send error message to client." << std::endl;
+        }
+        manager_.broadcast(username_ + " left the chat.");
     }
 }
 
@@ -152,7 +173,7 @@ int main(int argc, char *argv[]) {
             std::string u_name = chat::readLine(*socket);
 
             // check if username is already taken
-            while (chat_manager.exists(u_name)) {
+            while (chat_manager.sendTo(u_name, "")) {
                 chat::writeLine(*socket, "Username already taken. Please choose another one. Enter your username: ");
                 u_name = chat::readLine(*socket);
             }
@@ -169,7 +190,7 @@ int main(int argc, char *argv[]) {
             try {
                 chat::writeLine(*socket, "Error: connection closed (" + std::string(e.what()) + ")");
             } catch (...) {
-                
+                std::cerr << "Error: Failed to send error message to client." << std::endl;
             }
             boost::system::error_code ec;
             socket->close(ec);

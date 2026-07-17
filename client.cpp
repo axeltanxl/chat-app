@@ -85,7 +85,6 @@ private:
     }
 
     ChatClient& client_;
-    std::string username_;
 };
 
 } // namespace chat
@@ -99,10 +98,6 @@ int main(int argc, char* argv[]) {
         boost::asio::io_context io_context;
         chat::ChatClient client(io_context);
         client.connect(host, port);
-
-        // std::cout << "Enter your name: ";
-        // std::string username;
-        // std::getline(std::cin, username);
 
         chat::ChatSession session(client);
         session.run();
