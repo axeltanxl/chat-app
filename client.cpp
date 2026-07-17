@@ -72,10 +72,15 @@ private:
     void readLoop() {
         try {
             while (true) {
-                const std::string response = client_.receive();
+                std::string response = client_.receive();
                 if (response == "exit") {
                     std::cout << "\nConnection terminated" << std::endl;
                     break;
+                }
+                size_t pos = 0;
+                while ((pos = response.find("\\n", pos)) != std::string::npos) {
+                    response.replace(pos, 2, "\n");
+                    pos += 1;
                 }
                 std::cout << "\n" << response << std::endl;
             }

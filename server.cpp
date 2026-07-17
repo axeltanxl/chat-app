@@ -262,14 +262,14 @@ void ChatSession::run() {
                 sendData(manager_.listRooms());
             } else if (message == "/help") {
                 // help command
-                sendData("Your usename is " + username_ + ". You are in room '" + getRoom() + "'. Available commands:\n"
-                         "/msg <username> <message> - Send a private message to a user\n"
-                         "/join <room_name> - Join a room\n"
-                         "/create <room_name> - Create a new room\n"
-                         "/leave - Leave the current room\n"
-                         "/users - List users in the current room\n"
-                         "/rooms - List all available rooms\n"
-                         "/help - Show this help message\n"
+                sendData("Your username is " + username_ + ". You are in room '" + getRoom() + "'. Available commands:\\n"
+                         "/msg <username> <message> - Send a private message to a user\\n"
+                         "/join <room_name> - Join a room\\n"
+                         "/create <room_name> - Create a new room\\n"
+                         "/leave - Leave the current room\\n"
+                         "/users - List users in the current room\\n"
+                         "/rooms - List all available rooms\\n"
+                         "/help - Show this help message\\n"
                          "/exit - Disconnect from the chat");
             } else {
                 // broadcast message
