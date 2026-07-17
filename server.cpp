@@ -5,9 +5,11 @@
 #include <iostream>
 #include <thread>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 const unsigned short PORT = 9999;
-const std::size_t MAX_LINE_LENGTH = 15;
+const std::size_t MAX_LINE_LENGTH = 1024;
 
 namespace chat {
 
@@ -57,22 +59,40 @@ public:
 
     void run();
 
+    void setRoom(const std::string &room) {
+        room_ = room;
+    }
+
+    std::string getRoom() {
+        return room_;
+    }
+
 private:
     std::shared_ptr<boost::asio::ip::tcp::socket> socket_;
     std::string username_;
+    std::string room_;
     ChatManager& manager_;
 };
 
 class ChatManager {
 public:
+    ChatManager(){
+      rooms_["default"] = {};
+    }
+
     void add(const std::string &username, std::shared_ptr<ChatSession> session) {
         std::lock_guard<std::mutex> lock(mutex_);
         clients_[username] = session;
+        rooms_["default"].insert(username);
+        session->setRoom("default");
     };
 
     void remove(const std::string &username) {
         std::lock_guard<std::mutex> lock(mutex_);
         clients_.erase(username);
+        for (auto &[room_name, users] : rooms_) {
+            users.erase(username);
+        }
     };
 
     bool sendTo(const std::string &username, const std::string &message) {
@@ -85,11 +105,71 @@ public:
         return false;
     };
 
+    // broadcasts a message to all clients in the same room as the sender
+    void broadcast(const std::string &sender, const std::string &message) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto sender_it = clients_.find(sender);
+        if (sender_it != clients_.end()) {
+            const std::string &room_name = sender_it->second->getRoom();
+            auto room_it = rooms_.find(room_name);
+            if (room_it != rooms_.end()) {
+                for (const auto &username : room_it->second) {
+                    clients_[username]->sendData(sender + ": " + message);
+                }
+            }
+        }
+    }
+
     void broadcast(const std::string &message) {
         std::lock_guard<std::mutex> lock(mutex_);
         for (const auto &[username, session] : clients_) {
             session->sendData(message);
         }
+    }
+
+    void createRoom(const std::string &room_name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        rooms_[room_name] = {};
+    }
+
+    bool joinRoom(const std::string &username, const std::string &room_name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto room_it = rooms_.find(room_name);
+        if (room_it != rooms_.end()) {
+            // remove user from their current room
+            for (auto &[r_name, users] : rooms_) {
+                users.erase(username);
+            }
+            // add user to the new room
+            room_it->second.insert(username);
+            clients_[username]->setRoom(room_name);
+            return true;
+        }
+        return false;
+    }
+
+    std::string listRooms() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::string room_list = "Available rooms: ";
+        for (const auto &[room_name, users] : rooms_) {
+            room_list += room_name + ", ";
+        }
+        if (!rooms_.empty()) {
+            room_list.pop_back(); // remove last space
+            room_list.pop_back(); // remove last comma
+        }
+        return room_list;
+    }
+
+    bool leaveRoom(const std::string &username, const std::string &room_name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto room_it = rooms_.find(room_name);
+        if (room_it != rooms_.end()) {
+            room_it->second.erase(username);
+            clients_[username]->setRoom("default");
+            return true;
+        }
+        return false;
     }
 
     std::string listUsers() {
@@ -105,9 +185,31 @@ public:
         return user_list;
     }
 
+    std::string listUsersInRoom(const std::string &username) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto user_it = clients_.find(username);
+        if (user_it != clients_.end()) {
+            const std::string &room_name = user_it->second->getRoom();
+            auto room_it = rooms_.find(room_name);
+            if (room_it != rooms_.end()) {
+                std::string user_list = "Users in room '" + room_name + "': ";
+                for (const auto &user : room_it->second) {
+                    user_list += user + ", ";
+                }
+                if (!room_it->second.empty()) {
+                    user_list.pop_back(); // remove last space
+                    user_list.pop_back(); // remove last comma
+                }
+                return user_list;
+            }
+        }
+        return "Error: could not find the user's room.";
+    }
+
 private:
     std::mutex mutex_;
     std::unordered_map<std::string, std::shared_ptr<ChatSession>> clients_;
+    std::unordered_map<std::string, std::unordered_set<std::string>> rooms_;
 };
 
 void ChatSession::run() {
@@ -131,9 +233,44 @@ void ChatSession::run() {
                         sendData("Error: user '" + target_username + "' not found.");
                     }
                 }
-            } else if (message == "/list") {
-                // list users
-                sendData(manager_.listUsers());
+            } else if (message.starts_with("/join ")) {
+                // join room
+                std::string room_name = message.substr(6);
+                if (manager_.joinRoom(username_, room_name)) {
+                    sendData("Joined room '" + room_name + "'.");
+                } else {
+                    sendData("Error: room '" + room_name + "' does not exist.");
+                }
+            } else if (message.starts_with("/create ")) {
+                // create room
+                std::string room_name = message.substr(8);
+                manager_.createRoom(room_name);
+                sendData("Created room '" + room_name + "'.");
+            } else if (message.starts_with("/leave")) {
+                // leave current room
+                std::string current_room = getRoom();
+                if (current_room != "default" && manager_.leaveRoom(username_, current_room)) {
+                    sendData("Left room '" + current_room + "'. Now in default room.");
+                } else {
+                    sendData("Error: you are not in a room or already in the default room.");
+                }
+            } else if (message == "/users") {
+                // list all users
+                sendData(manager_.listUsersInRoom(username_));
+            } else if (message == "/rooms") {
+                // list rooms
+                sendData(manager_.listRooms());
+            } else if (message == "/help") {
+                // help command
+                sendData("Your usename is " + username_ + ". You are in room '" + getRoom() + "'. Available commands:\n"
+                         "/msg <username> <message> - Send a private message to a user\n"
+                         "/join <room_name> - Join a room\n"
+                         "/create <room_name> - Create a new room\n"
+                         "/leave - Leave the current room\n"
+                         "/users - List users in the current room\n"
+                         "/rooms - List all available rooms\n"
+                         "/help - Show this help message\n"
+                         "/exit - Disconnect from the chat");
             } else {
                 // broadcast message
                 manager_.broadcast(username_ + ": " + message);
