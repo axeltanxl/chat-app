@@ -114,16 +114,13 @@ public:
             auto room_it = rooms_.find(room_name);
             if (room_it != rooms_.end()) {
                 for (const auto &username : room_it->second) {
-                    clients_[username]->sendData(sender + ": " + message);
+                    try {
+                        clients_[username]->sendData(message);
+                    } catch (const std::exception &e) {
+                        std::cerr << "Error: failed to send to " << username << ": " << e.what() << std::endl;
+                    }
                 }
             }
-        }
-    }
-
-    void broadcast(const std::string &message) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto &[username, session] : clients_) {
-            session->sendData(message);
         }
     }
 
@@ -166,7 +163,6 @@ public:
         auto room_it = rooms_.find(room_name);
         if (room_it != rooms_.end()) {
             room_it->second.erase(username);
-            clients_[username]->setRoom("default");
             return true;
         }
         return false;
@@ -213,19 +209,14 @@ private:
 };
 
 void ChatSession::run() {
-    manager_.broadcast(username_ + " joined the chat!");
+    manager_.broadcast(username_, username_ + " joined the chat!");
 
     try {
         while (true) {
             const std::string message = getData();
-            if (message == "exit") {
-                manager_.broadcast(username_ + " left the chat.");
-                break;
-            }
-
             if (message.starts_with("/msg ")) {
                 // private message
-                size_t space_pos = message.find(' ', 5); // find the space after the username
+                size_t space_pos = message.find(' ', 5);
                 if (space_pos != std::string::npos) {
                     std::string target_username = message.substr(5, space_pos - 5);
                     std::string private_message = message.substr(space_pos + 1);
@@ -245,24 +236,28 @@ void ChatSession::run() {
                 // create room
                 std::string room_name = message.substr(8);
                 manager_.createRoom(room_name);
-                sendData("Created room '" + room_name + "'.");
+                manager_.joinRoom(username_, room_name);
+                sendData("Created and joined room '" + room_name + "'.");
             } else if (message.starts_with("/leave")) {
                 // leave current room
                 std::string current_room = getRoom();
                 if (current_room != "default" && manager_.leaveRoom(username_, current_room)) {
+                    manager_.joinRoom(username_, "default");
                     sendData("Left room '" + current_room + "'. Now in default room.");
                 } else {
                     sendData("Error: you are not in a room or already in the default room.");
                 }
             } else if (message == "/users") {
-                // list all users
+                // list all users in the same room
                 sendData(manager_.listUsersInRoom(username_));
             } else if (message == "/rooms") {
                 // list rooms
                 sendData(manager_.listRooms());
             } else if (message == "/help") {
                 // help command
-                sendData("Your username is " + username_ + ". You are in room '" + getRoom() + "'. Available commands:\\n"
+                sendData("Your username is " + username_ + ". \\n"
+                         "You are in room '" + getRoom() + "'. \\n"
+                         "Available commands:\\n"
                          "/msg <username> <message> - Send a private message to a user\\n"
                          "/join <room_name> - Join a room\\n"
                          "/create <room_name> - Create a new room\\n"
@@ -271,9 +266,13 @@ void ChatSession::run() {
                          "/rooms - List all available rooms\\n"
                          "/help - Show this help message\\n"
                          "/exit - Disconnect from the chat");
+            } else if (message == "/exit") {
+                manager_.leaveRoom(username_, getRoom());
+                manager_.broadcast(username_, username_ + " left the chat.");
+                break;
             } else {
                 // broadcast message
-                manager_.broadcast(username_ + ": " + message);
+                manager_.broadcast(username_, username_ + ": " + message);
             }
         }
     } catch (const std::exception &e) {
@@ -283,7 +282,6 @@ void ChatSession::run() {
         } catch (...) {
             std::cerr << "Error: Failed to send error message to client." << std::endl;
         }
-        manager_.broadcast(username_ + " left the chat.");
     }
 }
 

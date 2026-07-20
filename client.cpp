@@ -56,12 +56,12 @@ public:
 
         std::string reply;
         while (std::getline(std::cin, reply)) {
-            if (reply == "exit") {
+            if (reply == "/exit") {
                 break;
             }
             client_.send(reply);
         }
-        client_.send("exit");
+        client_.send("/exit");
 
         // closing the socket unblocks the reader thread's pending read.
         client_.close();
@@ -73,10 +73,6 @@ private:
         try {
             while (true) {
                 std::string response = client_.receive();
-                if (response == "exit") {
-                    std::cout << "\nConnection terminated" << std::endl;
-                    break;
-                }
                 size_t pos = 0;
                 while ((pos = response.find("\\n", pos)) != std::string::npos) {
                     response.replace(pos, 2, "\n");
