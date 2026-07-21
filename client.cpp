@@ -1,6 +1,3 @@
-// Client-side Synchronous Chatting Application
-// using C++ boost::asio
-
 #include <boost/asio.hpp>
 #include <iostream>
 #include <string>
@@ -81,7 +78,7 @@ private:
                 std::cout << "\n" << response << std::endl;
             }
         } catch (const std::exception&) {
-            
+            std::cout << "Disconnected from server." << std::endl;
         }
     }
 
@@ -103,7 +100,7 @@ int main(int argc, char* argv[]) {
         chat::ChatSession session(client);
         session.run();
     } catch (const std::exception& e) {
-        std::cerr << "Failed to connect/communicate: " << e.what() << std::endl;
+        std::cerr << "Failed to connect: " << e.what() << std::endl;
         return 1;
     }
 

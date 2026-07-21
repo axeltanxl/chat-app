@@ -1,6 +1,3 @@
-// Server-side Synchronous Chatting Application
-// using C++ boost::asio
-
 #include <boost/asio.hpp>
 #include <iostream>
 #include <thread>
@@ -26,28 +23,12 @@ void writeLine(boost::asio::ip::tcp::socket &socket, const std::string &message)
     boost::asio::write(socket, boost::asio::buffer(message + "\n"));
 }
 
-class ChatServer {
-public:
-    ChatServer(boost::asio::io_context &io_context, unsigned short port)
-        : io_context_(io_context), acceptor_(io_context, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)) {}
-
-    std::shared_ptr<boost::asio::ip::tcp::socket> acceptConnection() {
-        auto socket = std::make_shared<boost::asio::ip::tcp::socket>(io_context_);
-        acceptor_.accept(*socket);
-        return socket;
-    }
-
-private:
-    boost::asio::io_context& io_context_;
-    boost::asio::ip::tcp::acceptor acceptor_;
-};
-
-class ChatManager;
+class ChatServer;
 
 class ChatSession {
 public:
-    ChatSession(std::shared_ptr<boost::asio::ip::tcp::socket> socket, std::string username, ChatManager& manager)
-        : socket_(std::move(socket)), username_(std::move(username)), manager_(manager) {}
+    ChatSession(std::shared_ptr<boost::asio::ip::tcp::socket> socket, std::string username, ChatServer& server)
+        : socket_(std::move(socket)), username_(std::move(username)), server_(server) {}
 
     std::string getData() {
         return readLine(*socket_);
@@ -71,13 +52,20 @@ private:
     std::shared_ptr<boost::asio::ip::tcp::socket> socket_;
     std::string username_;
     std::string room_;
-    ChatManager& manager_;
+    ChatServer& server_;
 };
 
-class ChatManager {
+class ChatServer {
 public:
-    ChatManager(){
-      rooms_["default"] = {};
+    ChatServer(boost::asio::io_context &io_context, unsigned short port)
+        : io_context_(io_context), acceptor_(io_context, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)) {
+        rooms_["default"] = {};
+    }
+
+    std::shared_ptr<boost::asio::ip::tcp::socket> acceptConnection() {
+        auto socket = std::make_shared<boost::asio::ip::tcp::socket>(io_context_);
+        acceptor_.accept(*socket);
+        return socket;
     }
 
     void add(const std::string &username, std::shared_ptr<ChatSession> session) {
@@ -93,6 +81,11 @@ public:
         for (auto &[room_name, users] : rooms_) {
             users.erase(username);
         }
+    };
+
+    bool exists(const std::string &username) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return clients_.find(username) != clients_.end();
     };
 
     bool sendTo(const std::string &username, const std::string &message) {
@@ -203,13 +196,15 @@ public:
     }
 
 private:
+    boost::asio::io_context& io_context_;
+    boost::asio::ip::tcp::acceptor acceptor_;
     std::mutex mutex_;
     std::unordered_map<std::string, std::shared_ptr<ChatSession>> clients_;
     std::unordered_map<std::string, std::unordered_set<std::string>> rooms_;
 };
 
 void ChatSession::run() {
-    manager_.broadcast(username_, username_ + " joined the chat!");
+    server_.broadcast(username_, username_ + " joined the chat!");
 
     try {
         while (true) {
@@ -220,14 +215,14 @@ void ChatSession::run() {
                 if (space_pos != std::string::npos) {
                     std::string target_username = message.substr(5, space_pos - 5);
                     std::string private_message = message.substr(space_pos + 1);
-                    if (!manager_.sendTo(target_username, username_ + " (private): " + private_message)) {
+                    if (!server_.sendTo(target_username, username_ + " (private): " + private_message)) {
                         sendData("Error: user '" + target_username + "' not found.");
                     }
                 }
             } else if (message.starts_with("/join ")) {
                 // join room
                 std::string room_name = message.substr(6);
-                if (manager_.joinRoom(username_, room_name)) {
+                if (server_.joinRoom(username_, room_name)) {
                     sendData("Joined room '" + room_name + "'.");
                 } else {
                     sendData("Error: room '" + room_name + "' does not exist.");
@@ -235,24 +230,24 @@ void ChatSession::run() {
             } else if (message.starts_with("/create ")) {
                 // create room
                 std::string room_name = message.substr(8);
-                manager_.createRoom(room_name);
-                manager_.joinRoom(username_, room_name);
+                server_.createRoom(room_name);
+                server_.joinRoom(username_, room_name);
                 sendData("Created and joined room '" + room_name + "'.");
             } else if (message.starts_with("/leave")) {
                 // leave current room
                 std::string current_room = getRoom();
-                if (current_room != "default" && manager_.leaveRoom(username_, current_room)) {
-                    manager_.joinRoom(username_, "default");
+                if (current_room != "default" && server_.leaveRoom(username_, current_room)) {
+                    server_.joinRoom(username_, "default");
                     sendData("Left room '" + current_room + "'. Now in default room.");
                 } else {
                     sendData("Error: you are not in a room or already in the default room.");
                 }
             } else if (message == "/users") {
                 // list all users in the same room
-                sendData(manager_.listUsersInRoom(username_));
+                sendData(server_.listUsersInRoom(username_));
             } else if (message == "/rooms") {
                 // list rooms
-                sendData(manager_.listRooms());
+                sendData(server_.listRooms());
             } else if (message == "/help") {
                 // help command
                 sendData("Your username is " + username_ + ". \\n"
@@ -267,12 +262,12 @@ void ChatSession::run() {
                          "/help - Show this help message\\n"
                          "/exit - Disconnect from the chat");
             } else if (message == "/exit") {
-                manager_.leaveRoom(username_, getRoom());
-                manager_.broadcast(username_, username_ + " left the chat.");
+                server_.leaveRoom(username_, getRoom());
+                server_.broadcast(username_, username_ + " left the chat.");
                 break;
             } else {
                 // broadcast message
-                manager_.broadcast(username_, username_ + ": " + message);
+                server_.broadcast(username_, username_ + ": " + message);
             }
         }
     } catch (const std::exception &e) {
@@ -292,8 +287,6 @@ int main(int argc, char *argv[]) {
 
     chat::ChatServer chat_server(io_context, PORT);
 
-    chat::ChatManager chat_manager;
-
     std::cout << "Server is running on port " << PORT << "..." << std::endl;
 
     while(true){
@@ -308,17 +301,17 @@ int main(int argc, char *argv[]) {
             std::string u_name = chat::readLine(*socket);
 
             // check if username is already taken
-            while (chat_manager.sendTo(u_name, "")) {
-                chat::writeLine(*socket, "Username already taken. Please choose another one. Enter your username: ");
+            while (chat_server.exists(u_name)) {
+                chat::writeLine(*socket, "Username already taken. Please choose another one.\\nEnter your username: ");
                 u_name = chat::readLine(*socket);
             }
 
-            auto session = std::make_shared<chat::ChatSession>(socket, u_name, chat_manager);
-            chat_manager.add(u_name, session);
+            auto session = std::make_shared<chat::ChatSession>(socket, u_name, chat_server);
+            chat_server.add(u_name, session);
 
-            std::thread([session, &chat_manager, u_name]() {
+            std::thread([session, &chat_server, u_name]() {
                 session->run();
-                chat_manager.remove(u_name);
+                chat_server.remove(u_name);
             }).detach();
         } catch (const std::exception &e) {
             std::cerr << "Error during connection setup: " << e.what() << std::endl;
