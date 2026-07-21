@@ -117,9 +117,13 @@ public:
         }
     }
 
-    void createRoom(const std::string &room_name) {
+    bool createRoom(const std::string &room_name) {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (rooms_.find(room_name) != rooms_.end()) {
+            return false;
+        }
         rooms_[room_name] = {};
+        return true;
     }
 
     bool joinRoom(const std::string &username, const std::string &room_name) {
@@ -230,9 +234,12 @@ void ChatSession::run() {
             } else if (message.starts_with("/create ")) {
                 // create room
                 std::string room_name = message.substr(8);
-                server_.createRoom(room_name);
-                server_.joinRoom(username_, room_name);
-                sendData("Created and joined room '" + room_name + "'.");
+                if (server_.createRoom(room_name)) {
+                    server_.joinRoom(username_, room_name);
+                    sendData("Created and joined room '" + room_name + "'.");
+                } else {
+                    sendData("Error: room '" + room_name + "' already exists.");
+                }
             } else if (message.starts_with("/leave")) {
                 // leave current room
                 std::string current_room = getRoom();
